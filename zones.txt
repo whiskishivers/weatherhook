@@ -1,0 +1,5 @@
+# Use https://alerts.weather.gov/ to look up county and forecast zones to put in this file.
+# One zone per line.
+# Example:
+# NYC001
+# COC123
