@@ -39,8 +39,8 @@ class AlertTracker(Dict[str, wapi.Alert]):
 
 async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
     """ Post message and add alert to tracker """
-    message = await webhook.send(content=alert.headline, embed=alert.embed, username=alert.senderName, wait=True)
-    logging.debug(f"Posted: {alert.id}")
+    message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, username=alert.senderName, wait=True)
+    logging.info(f"Posted: {alert.id}")
     alert.message_id = message.id
     tracker.add_alert(alert)
 
@@ -49,10 +49,10 @@ async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: w
     """ Delete discord message and remove alert from tracker """
     try:
         await webhook.delete_message(int(alert.message_id))
-        logging.debug(f"Deleted: {alert.id}")
+        logging.info(f"Deleted: {alert.id}")
         tracker.remove_alert(alert)
     except discord.NotFound:
-        logging.warning(f"Could not find Discord message for alert: {alert.event}")
+        logging.warning(f"Discord message missing when deleting alert: {alert.event}")
 
 
 async def discord_sync(active_alerts: List[wapi.Alert], tracker: AlertTracker):
@@ -103,28 +103,30 @@ async def main():
         try:
             active_alerts = await fetch_alerts(zones_file, w_client)
         except aiohttp.ClientResponseError as e:
-            logging.warning("Got response error when fetching alerts.")
+            logging.error("Got response error when fetching alerts.")
             print(e)
         except aiohttp.ConnectionTimeoutError:
-            logging.warning(f"Connection timed out when fetching alerts.")
+            logging.error(f"Connection timed out when fetching alerts.")
 
         # Synchronize tracked alerts and adjust sleep timer based on alert urgency
         try:
             await discord_sync(active_alerts, tracker)
+
             if tracker.has_urgent_alerts():
-                sleep_timer = 60.0 + random.uniform(-10.0, 0.0)
+                sleep_timer = 60.0 - random.uniform(10.0, 0.0)
             else:
-                sleep_timer = 300.0 + random.uniform(-15.0, 15.0)
-            logging.debug(f"Sleep timer: {sleep_timer}")
+                sleep_timer = 300.0 - random.uniform(15.0, 0.0)
+            logging.info(f"Sleep timer: {sleep_timer}")
             await asyncio.sleep(sleep_timer)
+
         except asyncio.CancelledError:
             break
 
 
 if __name__ == "__main__":
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-    DEBUG_LVL = os.environ.get("DEBUG_LVL", "50")
-    logging.basicConfig(level=int(DEBUG_LVL), format='%(asctime)s - %(levelname)s - %(message)s')
+    LOG_LVL = os.environ.get("LOG_LVL", "30")
+    logging.basicConfig(level=int(LOG_LVL), format='%(asctime)s - %(levelname)s - %(message)s')
     if WEBHOOK_URL is None:
         print("WEBHOOK_URL environment variable is not set.")
         logging.critical("WEBHOOK_URL environment var is missing.")
