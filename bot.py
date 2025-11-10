@@ -10,7 +10,6 @@ import discord
 
 import wapi
 
-
 class AlertTracker(Dict[str, wapi.Alert]):
     """Dict wrapper for tracking active alerts."""
 
@@ -40,20 +39,18 @@ class AlertTracker(Dict[str, wapi.Alert]):
 async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
     """ Post message and add alert to tracker """
     message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, username=alert.senderName, wait=True)
-    logging.info(f"Posted: {alert.id}")
+    logging.info(f"Posted: {alert.event}")
     alert.message_id = message.id
     tracker.add_alert(alert)
-
 
 async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert) -> None:
     """ Delete discord message and remove alert from tracker """
     try:
         await webhook.delete_message(int(alert.message_id))
-        logging.info(f"Deleted: {alert.id}")
+        logging.info(f"Deleted: {alert.event}")
         tracker.remove_alert(alert)
     except discord.NotFound:
         logging.warning(f"Discord message missing when deleting alert: {alert.event}")
-
 
 async def discord_sync(active_alerts: List[wapi.Alert], tracker: AlertTracker):
     """ Post and delete alerts based on activity """
@@ -68,19 +65,18 @@ async def discord_sync(active_alerts: List[wapi.Alert], tracker: AlertTracker):
         for alert in tracker.new_alerts(active_alerts):
             tasks.append(post_alert(tracker, webhook, alert))
 
+        if len(tasks):
+            print(f"{time.strftime('%H:%M:%S')} Syncing {len(tasks)} alert messages.")
+
         await asyncio.gather(*tasks)
 
-        if len(tasks):
-            print(f"{time.strftime('%H:%M:%S')} Synced {len(tasks)} alert messages.")
-
-
-async def fetch_alerts(zones_file: str, client: wapi.Client) -> List[wapi.Alert]:
+async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Alert]:
     """ Get active alerts from NWS API """
     try:
-        with open(zones_file, "r") as f:
-            zones = ",".join([i.strip() for i in f.readlines() if not i.strip().startswith("#") and len(i.strip())])
+        with open(zones_filepath, "r") as f:
+            zones = ",".join([i.strip().upper() for i in f.readlines() if not i.strip().startswith("#") and len(i.strip())])
         if not zones:
-            logging.warning("No zones have been loaded from zones.txt.")
+            logging.warning(f"Nothing to do! No zones loaded from {zones_filepath}")
             return []
 
         alerts = await client.alerts.active(zone=zones, severity="Moderate,Severe,Extreme,Unknown")
@@ -88,14 +84,13 @@ async def fetch_alerts(zones_file: str, client: wapi.Client) -> List[wapi.Alert]
         return alerts
 
     except FileNotFoundError:
-        logging.warning(f"Could not find the file '{zones_file}'.")
+        logging.warning(f"Could not find the file '{zones_filepath}'.")
         return []
-
 
 async def main():
     w_client = wapi.client
     tracker = AlertTracker()
-    zones_file = "zones.txt"
+    zones_file = os.path.join(SCRIPT_DIR, "zones.txt")
     active_alerts: list[wapi.Alert] | None = None
 
     while True:
@@ -116,7 +111,7 @@ async def main():
                 sleep_timer = 60.0 - random.uniform(10.0, 0.0)
             else:
                 sleep_timer = 300.0 - random.uniform(15.0, 0.0)
-            logging.info(f"Sleep timer: {sleep_timer}")
+            logging.info(f"Sleep timer: {sleep_timer:.2f}")
             await asyncio.sleep(sleep_timer)
 
         except asyncio.CancelledError:
@@ -124,8 +119,10 @@ async def main():
 
 
 if __name__ == "__main__":
-    WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
     LOG_LVL = os.environ.get("LOG_LVL", "30")
+    WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
     logging.basicConfig(level=int(LOG_LVL), format='%(asctime)s - %(levelname)s - %(message)s')
     if WEBHOOK_URL is None:
         print("WEBHOOK_URL environment variable is not set.")
