@@ -149,7 +149,7 @@ class Alert(Feature):
         """ Discord message embed """
         color = self._alert_colors.get((self.severity, self.urgency))
         description = ""
-        # Get full description for urgent alerts, otherwise use headline
+        # Use full description for urgent alerts, otherwise use headline
         if self.urgency == "Immediate" or self.nws_headline is None:
             description += self.description[:4096]
         elif self.nws_headline:

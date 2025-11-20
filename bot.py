@@ -107,11 +107,12 @@ async def main():
         try:
             await discord_sync(active_alerts, tracker)
 
+            sleep_timer = random.uniform(-1.0, 0.0)
             if tracker.has_urgent_alerts():
-                sleep_timer = 60.0 - random.uniform(10.0, 0.0)
+                sleep_timer += 60
             else:
-                sleep_timer = 300.0 - random.uniform(15.0, 0.0)
-            logging.info(f"Sleep timer: {sleep_timer:.2f}")
+                sleep_timer += 300.0
+            logging.info(f"Sleeping {sleep_timer:.2f}...")
             await asyncio.sleep(sleep_timer)
 
         except asyncio.CancelledError:
