@@ -99,7 +99,7 @@ class Alert(Feature):
     zones: typing.Any
     effective: typing.Optional[dt.datetime] = field(default=None)
     ends: typing.Optional[dt.datetime] = field(default=None)
-    expires: typing.Optional[dt.datetime] = field(default=None)  # Correct field name
+    expires: typing.Optional[dt.datetime] = field(default=None)
     onset: typing.Optional[dt.datetime] = field(default=None)
     sent: typing.Optional[dt.datetime] = field(default=None)
     nws_headline: typing.Optional[list[str]] = field(default=None, init=False)
@@ -107,7 +107,7 @@ class Alert(Feature):
 
 
     def __init__(self, alert_feature: dict):
-        # Inits up and down and everywhere
+        # Init up and down and everywhere
         super().__init__(alert_feature)
         self.__post_init__()
 
