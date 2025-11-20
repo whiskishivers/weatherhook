@@ -2,90 +2,147 @@ import datetime as dt
 import logging
 import re
 import time
-from dataclasses import dataclass
+import typing
+from dataclasses import dataclass, field
+from typing import ClassVar
 
 import aiohttp
 import discord
 
 
-class FeatureCollection(list):
-    """ Default object from API """
+class FeatureCollection:
+    """ Collection object for API features. """
 
-    def __init__(self, fcoll=None):
-        super().__init__()
-        self.title = fcoll.get("title")
-        for feature in fcoll["features"]:
-            match feature["properties"]["@type"]:
+    def __init__(self, fcoll: dict | None = None):
+        if fcoll is None:
+            fcoll = {}
+
+        # Composition: Hold the features as a list attribute
+        self.features: list[Feature | Alert] = []
+        self.title: str | None = fcoll.get("title")
+
+        # Process features safely
+        raw_features = fcoll.get("features", [])
+
+        for feature in raw_features:
+            # Safely get the type attribute
+            feature_type = feature.get("properties", {}).get("@type")
+
+            match feature_type:
                 case "wx:Alert":
-                    self.append(Alert(feature))
+                    self.features.append(Alert(feature))
                 case _:
-                    self.append(Feature(feature))
+                    self.features.append(Feature(feature))
 
     def __repr__(self):
-        return f"FeatureCollection({self.title})"
+        return f"FeatureCollection(title='{self.title}', count={len(self.features)})"
+
+    # Helper methods for list-like behavior
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, index):
+        return self.features[index]
+
+    def __iter__(self):
+        return iter(self.features)
+
+    def sort(self, *args, **kwargs):
+        return self.features.sort(*args, **kwargs)
 
 
 class Feature:
-    id: str = None
+    """ Base object from API """
 
-    def __init__(self, feature):
-        for k, v in feature["properties"].items():
-            setattr(self, k, v)
+    id: str | None = None
+    type_name: str | None = None
+
+    def __init__(self, feature: dict):
+        properties = feature.get("properties", {})
+        self.id = feature.get("id")
+
+        # Assign properties
+        for k, v in properties.items():
+            # Rename the reserved keyword
+            if k == "@type":
+                self.type_name = v
+            else:
+                setattr(self, k, v)
 
     def __repr__(self):
-        return f"Feature({self.id})"
+        return f"Feature(id='{self.id}')"
 
 
-@dataclass(order=True)
+@dataclass(order=True, init=False)
 class Alert(Feature):
+    _alert_colors: ClassVar[dict] = {
+        ("Severe", "Expected"): discord.Color.dark_gold(),
+        ("Severe", "Future"): discord.Color.dark_gold(),
+        ("Severe", "Immediate"): discord.Color.gold(),
+        ("Extreme", "Expected"): discord.Color.dark_red(),
+        ("Extreme", "Future"): discord.Color.dark_red(),
+        ("Extreme", "Immediate"): discord.Color.red()
+    }
+
     affectedZones: list
     areaDesc: str
     description: str
     headline: str
     message_id: str
-    effective: dt.datetime
-    ends: dt.datetime
     event: str
-    expires: dt.datetime
-    instruction: str
+    instruction: typing.Optional[str]
     parameters: dict
     response: str
     senderName: str
-    sent: dt.datetime
-    onset: dt.datetime
     severity: str
     urgency: str
-    wmo: str | None
-    zones: FeatureCollection
-    _alert_colors = {("Severe", "Expected"): discord.Color.dark_gold(),
-                     ("Severe", "Future"): discord.Color.dark_gold(),
-                     ("Severe", "Immediate"): discord.Color.gold(),
-                     ("Extreme", "Expected"): discord.Color.dark_red(),
-                     ("Extreme", "Future"): discord.Color.dark_red(),
-                     ("Extreme", "Immediate"): discord.Color.red()}
+    zones: typing.Any
+    effective: typing.Optional[dt.datetime] = field(default=None)
+    ends: typing.Optional[dt.datetime] = field(default=None)
+    expires: typing.Optional[dt.datetime] = field(default=None)  # Correct field name
+    onset: typing.Optional[dt.datetime] = field(default=None)
+    sent: typing.Optional[dt.datetime] = field(default=None)
+    nws_headline: typing.Optional[list[str]] = field(default=None, init=False)
+    wmo: typing.Optional[str] = field(default=None, init=False)
 
-    def __init__(self, alert_feature):
+
+    def __init__(self, alert_feature: dict):
+        # Inits up and down and everywhere
         super().__init__(alert_feature)
-        # pull out required parameters
-        self.nws_headline = self.parameters.get("NWSheadline")
-        try:
-            self.wmo = self.parameters["WMOidentifier"][0].split(" ")[1][-3:]
-        except (KeyError, TypeError):
-            self.wmo = None
+        self.__post_init__()
 
-        # Make awful space formatting be comma-separated instead
+    def __post_init__(self):
+        properties = getattr(self, "properties", {})
+
+        self.nws_headline = self.parameters.get("NWSHeadline")
+
+        # Extract WMO identifier
+        wmo_list = self.parameters.get("WMOidentifier")
+        if wmo_list and isinstance(wmo_list, list) and len(wmo_list) > 0:
+            try:
+                parts = wmo_list[0].split(" ")
+                if len(parts) >= 2:
+                    self.wmo = parts[1][-3:]
+            except IndexError:
+                self.wmo = None
+
         if self.description is not None:
+            # Clean up awful formatting when "columns" are in the text
             self.description = re.sub(r"\s{4,}", ", ", self.description).strip()
 
-        # Change required date strings to datetime objects
-        for i in ("sent", "effective", "onset", "expires", "ends"):
+        # Convert date fields to datetime objects
+        for field_name in ("sent", "effective", "onset", "expires", "ends"):
+            date_str = properties.get(field_name)
+            if date_str is None or date_str == "":
+                setattr(self, field_name, None)
+                continue
             try:
-                setattr(self, i, dt.datetime.fromisoformat(alert_feature["properties"][i]))
-            except TypeError:  # null
-                setattr(self, i, None)
+                setattr(self, field_name, dt.datetime.fromisoformat(date_str))
+            except ValueError:
+                setattr(self, field_name, None)
 
     def __repr__(self):
-        return f"Alert({self.event})"
+        return f"Alert(event='{self.event}', sender='{self.senderName}')"
 
     @property
     def embed(self) -> discord.Embed:
@@ -100,7 +157,7 @@ class Alert(Feature):
 
         embed = discord.Embed(color=color, title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
                               description=description, timestamp=self.sent)
-        # Embed Fields
+
         #Include instructions if alert response calls for action
         if self.instruction and self.response in ("Evacuate", "Execute", "Shelter"):
             instructions = re.sub(r"(?<!\n)\n(?!\n)", " ", self.instruction).strip()
@@ -129,12 +186,17 @@ class Alert(Feature):
 
 
 class ClientAlerts:
+    """Resource accessor for NWS Alerts."""
+
     def __init__(self, parent):
         self.parent = parent
 
-    async def active(self, **params) -> FeatureCollection[Alert]:
+    async def active(self, **params) -> FeatureCollection:
+        """
+        Retrieves active NWS alerts.
+        Documentation typically uses 'alerts/active' endpoint.
+        """
         return FeatureCollection(await self.parent.get(f"alerts/active", params=params))
-
 
 class Client:
     def __init__(self):
