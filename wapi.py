@@ -107,12 +107,7 @@ class Alert(Feature):
 
 
     def __init__(self, alert_feature: dict):
-        # Init up and down and everywhere
         super().__init__(alert_feature)
-        self.__post_init__()
-
-    def __post_init__(self):
-        properties = getattr(self, "properties", {})
 
         self.nws_headline = self.parameters.get("NWSHeadline")
 
@@ -132,17 +127,21 @@ class Alert(Feature):
 
         # Convert date fields to datetime objects
         for field_name in ("sent", "effective", "onset", "expires", "ends"):
-            date_str = properties.get(field_name)
-            if date_str is None or date_str == "":
+            # 1. Get the value that Feature.__init__ put there (it is likely a string)
+            val = getattr(self, field_name, None)
+            if not isinstance(val, str) or not val:
                 setattr(self, field_name, None)
                 continue
             try:
-                setattr(self, field_name, dt.datetime.fromisoformat(date_str))
+                setattr(self, field_name, dt.datetime.fromisoformat(val))
             except ValueError:
                 setattr(self, field_name, None)
 
     def __repr__(self):
         return f"Alert(event='{self.event}', sender='{self.senderName}')"
+
+    def __str__(self):
+        return self.__repr__()
 
     @property
     def embed(self) -> discord.Embed:

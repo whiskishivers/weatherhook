@@ -13,12 +13,12 @@ import wapi
 class AlertTracker(Dict[str, wapi.Alert]):
     """Dict wrapper for tracking active alerts."""
 
-    def new_alerts(self, active_alerts: List[wapi.Alert]) -> list[wapi.Alert]:
+    def new_alerts(self, active_alerts: wapi.FeatureCollection) -> list[wapi.Alert]:
         """Determine which active alerts are new (not yet tracked)."""
         new_ids = {alert.id for alert in active_alerts} - self.keys()
         return [i for i in active_alerts if i.id in new_ids]
 
-    def expired_alerts(self, active_alerts: List[wapi.Alert]) -> list[wapi.Alert]:
+    def expired_alerts(self, active_alerts: wapi.FeatureCollection) -> list[wapi.Alert]:
         """Determine which tracked alerts are no longer active."""
         expired_ids = self.keys() - {alert.id for alert in active_alerts}
         return [i for i in self.values() if i.id in expired_ids]
@@ -30,16 +30,14 @@ class AlertTracker(Dict[str, wapi.Alert]):
         return self.pop(alert.id)
 
     def has_urgent_alerts(self):
-        for i in self.values():
-            if i.urgency == "Immediate" or i.severity == "Extreme":
-                return True
-        return False
+        """True if any urgent alerts are tracked"""
+        return any(alert.urgency == "Immediate" or alert.severity == "Extreme" for alert in self.values())
 
 
 async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
     """ Post message and add alert to tracker """
     message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, username=alert.senderName, wait=True)
-    logging.info(f"Posted: {alert.event}")
+    logging.info(f"Posted: {alert}")
     alert.message_id = message.id
     tracker.add_alert(alert)
 
@@ -47,12 +45,12 @@ async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: w
     """ Delete discord message and remove alert from tracker """
     try:
         await webhook.delete_message(int(alert.message_id))
-        logging.info(f"Deleted: {alert.event}")
+        logging.info(f"Deleted: {alert}")
         tracker.remove_alert(alert)
     except discord.NotFound:
         logging.warning(f"Discord message missing when deleting alert: {alert.event}")
 
-async def discord_sync(active_alerts: List[wapi.Alert], tracker: AlertTracker):
+async def discord_sync(active_alerts: list[wapi.Alert], tracker: AlertTracker):
     """ Post and delete alerts based on activity """
     async with aiohttp.ClientSession() as session:
         webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
