@@ -88,7 +88,7 @@ class Alert(Feature):
     areaDesc: str
     description: str
     headline: str
-    message_id: str
+    message_id: str # discord message id
     event: str
     instruction: typing.Optional[str]
     parameters: dict
@@ -122,12 +122,13 @@ class Alert(Feature):
                 self.wmo = None
 
         if self.description is not None:
-            # Clean up awful formatting when "columns" are in the text
+            # Clean up awful formatting when spacing is used for columns
             self.description = re.sub(r"\s{4,}", ", ", self.description).strip()
+            # Remove linebreaks between letters/digits
+            self.description = re.sub(r'(?<=\w)[ \t]*[\r\n]+[ \t]*(?=\w)', " ", self.description)
 
-        # Convert date fields to datetime objects
+        # Convert date fields to datetime objects, None if it is not included or is invalid format
         for field_name in ("sent", "effective", "onset", "expires", "ends"):
-            # 1. Get the value that Feature.__init__ put there (it is likely a string)
             val = getattr(self, field_name, None)
             if not isinstance(val, str) or not val:
                 setattr(self, field_name, None)
@@ -151,7 +152,7 @@ class Alert(Feature):
         # Use full description for urgent alerts, otherwise use headline
         if self.urgency == "Immediate" or self.nws_headline is None:
             description += self.description[:4096]
-        elif self.nws_headline:
+        else:
             description += f"{"\n".join(self.nws_headline)}"
 
         embed = discord.Embed(color=color, title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
@@ -164,9 +165,9 @@ class Alert(Feature):
 
         embed.add_field(name="Severity", value=f"{self.severity} - {self.urgency}")
 
-        if self.onset is not None:
+        if self.onset:
             embed.add_field(name="Onset", value=f"<t:{int(self.onset.timestamp())}:R>")
-        if self.ends is not None:
+        if self.ends:
             embed.add_field(name="Ends", value=f"<t:{int(self.ends.timestamp())}:R>")
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
@@ -182,7 +183,6 @@ class Alert(Feature):
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
         return embed
-
 
 class ClientAlerts:
     """Resource accessor for NWS Alerts."""
