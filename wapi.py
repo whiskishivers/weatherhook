@@ -13,19 +13,18 @@ import discord
 class FeatureCollection:
     """ Collection object for API features. """
 
-    def __init__(self, fcoll: dict | None = None):
-        if fcoll is None:
-            fcoll = {}
+    def __init__(self, raw_collection: dict | None = None):
+        if raw_collection is None:
+            raw_collection = {}
 
         # Composition: Hold the features as a list attribute
         self.features: list[Feature | Alert] = []
-        self.title: str | None = fcoll.get("title")
+        self.title: str | None = raw_collection.get("title")
 
         # Process features safely
-        raw_features = fcoll.get("features", [])
+        raw_features = raw_collection.get("features", [])
 
         for feature in raw_features:
-            # Safely get the type attribute
             feature_type = feature.get("properties", {}).get("@type")
 
             match feature_type:
@@ -88,7 +87,7 @@ class Alert(Feature):
     areaDesc: str
     description: str
     headline: str
-    message_id: str # discord message id
+    message_id: str  # discord message id
     event: str
     instruction: typing.Optional[str]
     parameters: dict
@@ -105,11 +104,10 @@ class Alert(Feature):
     nws_headline: typing.Optional[list[str]] = field(default=None, init=False)
     wmo: typing.Optional[str] = field(default=None, init=False)
 
-
     def __init__(self, alert_feature: dict):
         super().__init__(alert_feature)
 
-        self.nws_headline = self.parameters.get("NWSHeadline")
+        self.nws_headline = self.parameters.get("NWSheadline")
 
         # Extract WMO identifier
         wmo_list = self.parameters.get("WMOidentifier")
@@ -121,13 +119,16 @@ class Alert(Feature):
             except IndexError:
                 self.wmo = None
 
-        if self.description is not None:
+        # Fix formatting for description and instruction fields
+        if self.description:
             # Clean up awful formatting when spacing is used for columns
             self.description = re.sub(r"\s{4,}", ", ", self.description).strip()
-            # Remove linebreaks between letters/digits
-            self.description = re.sub(r'(?<=\w)[ \t]*[\r\n]+[ \t]*(?=\w)', " ", self.description)
+            # Remove linebreaks between letters/digits, commas, periods
+            self.description = re.sub(r'(?<=[\w,.])[ \t]*[\r\n]+[ \t]*(?=[\w,.])', " ", self.description).strip()
+        if self.instruction:
+            self.instruction = re.sub(r'(?<=[\w,.])[ \t]*[\r\n]+[ \t]*(?=[\w,.])', " ", self.instruction).strip()
 
-        # Convert date fields to datetime objects, None if it is not included or is invalid format
+        # Convert date fields to datetime objects
         for field_name in ("sent", "effective", "onset", "expires", "ends"):
             val = getattr(self, field_name, None)
             if not isinstance(val, str) or not val:
@@ -139,7 +140,7 @@ class Alert(Feature):
                 setattr(self, field_name, None)
 
     def __repr__(self):
-        return f"Alert(event='{self.event}', sender='{self.senderName}')"
+        return f"Alert(event='{self.event}')"
 
     def __str__(self):
         return self.__repr__()
@@ -148,27 +149,30 @@ class Alert(Feature):
     def embed(self) -> discord.Embed:
         """ Discord message embed """
         color = self._alert_colors.get((self.severity, self.urgency))
-        description = ""
-        # Use full description for urgent alerts, otherwise use headline
-        if self.urgency == "Immediate" or self.nws_headline is None:
-            description += self.description[:4096]
+        if self.nws_headline is not None:
+            headline = "\n".join(self.nws_headline) + "\n"
         else:
-            description += f"{"\n".join(self.nws_headline)}"
+            headline = ""
 
-        embed = discord.Embed(color=color, title=self.event, url=f"https://alerts.weather.gov/search?id={self.id}",
-                              description=description, timestamp=self.sent)
+        description = (headline + self.description)
 
-        #Include instructions if alert response calls for action
+        embed = discord.Embed(color=color, title=self.event,
+                              description=description[:4096], timestamp=self.sent)
+
+        # Include instructions if alert response calls for action
         if self.instruction and self.response in ("Evacuate", "Execute", "Shelter"):
-            instructions = re.sub(r"(?<!\n)\n(?!\n)", " ", self.instruction).strip()
-            embed.add_field(name="Instructions", value=instructions[:1024], inline=False)
+            embed.add_field(name="Instructions", value=self.instruction[:1024], inline=False)
+
+        # Timestamp fields
+        if self.onset:
+            onset_ts = int(self.onset.timestamp())
+            embed.add_field(name="Onset", value=f"<t:{onset_ts}:d> <t:{onset_ts}:t>")
+        if self.ends:
+            ends_ts = int(self.ends.timestamp())
+            embed.add_field(name="End", value=f"<t:{ends_ts}:d> <t:{ends_ts}:t>")
 
         embed.add_field(name="Severity", value=f"{self.severity} - {self.urgency}")
 
-        if self.onset:
-            embed.add_field(name="Onset", value=f"<t:{int(self.onset.timestamp())}:R>")
-        if self.ends:
-            embed.add_field(name="Ends", value=f"<t:{int(self.ends.timestamp())}:R>")
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
             embed.set_author(name=self.senderName, url=author_url)
@@ -184,6 +188,7 @@ class Alert(Feature):
             embed.set_author(name=self.senderName, url=author_url)
         return embed
 
+
 class ClientAlerts:
     """Resource accessor for NWS Alerts."""
 
@@ -196,6 +201,7 @@ class ClientAlerts:
         Documentation typically uses 'alerts/active' endpoint.
         """
         return FeatureCollection(await self.parent.get(f"alerts/active", params=params))
+
 
 class Client:
     def __init__(self):

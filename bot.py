@@ -10,16 +10,17 @@ import discord
 
 import wapi
 
+
 class AlertTracker(Dict[str, wapi.Alert]):
     """Dict wrapper for tracking active alerts."""
 
     def compare(self, active_alerts: list):
         """Determine which active alerts are new (not yet tracked) or expired (not in active alerts)."""
         new_ids = {alert.id for alert in active_alerts} - self.keys()
-        new =  [i for i in active_alerts if i.id in new_ids]
+        new = [i for i in active_alerts if i.id in new_ids]
 
         expired_ids = self.keys() - {alert.id for alert in active_alerts}
-        expired =  [i for i in self.values() if i.id in expired_ids]
+        expired = [i for i in self.values() if i.id in expired_ids]
 
         return new, expired
 
@@ -27,24 +28,31 @@ class AlertTracker(Dict[str, wapi.Alert]):
         """True if any urgent alerts are tracked"""
         return any(alert.urgency == "Immediate" or alert.severity == "Extreme" for alert in self.values())
 
+
 async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
     """ Post message and add alert to tracker """
-    message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, wait=True)
-    logging.info(f"Posted: {alert}")
-    alert.message_id = message.id
-    tracker[alert.id] = alert
+    try:
+        message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, wait=True)
+        logging.info(f"Posted: {alert}")
+        alert.message_id = message.id
+        tracker[alert.id] = alert
+    except discord.HTTPException as e:
+        logging.warning(f"Could not post {alert}")
+        logging.warning(e.text)
 
 async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert) -> None:
-    """ Delete discord message and remove alert from tracker """
+    """ Delete message and remove alert from tracker """
     try:
         await webhook.delete_message(int(alert.message_id))
         logging.info(f"Deleted: {alert}")
         del tracker[alert.id]
-    except discord.NotFound:
-        logging.warning(f"Discord message missing when deleting alert: {alert.event}")
+    except discord.HTTPException as e:
+        logging.warning(f"Could not delete {alert}")
+        logging.warning(e.text)
+
 
 async def discord_sync(active_alerts: list, tracker: AlertTracker):
-    """ Post and delete alerts based on activity """
+    """ Post new alerts and delete inactive alerts """
     async with aiohttp.ClientSession() as session:
         webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
         tasks = []
@@ -63,11 +71,13 @@ async def discord_sync(active_alerts: list, tracker: AlertTracker):
 
         await asyncio.gather(*tasks)
 
+
 async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Alert]:
     """ Get active alerts from NWS API """
     try:
         with open(zones_filepath, "r") as f:
-            zones = ",".join([i.strip().upper() for i in f.readlines() if not i.strip().startswith("#") and len(i.strip())])
+            zones = ",".join(
+                [i.strip().upper() for i in f.readlines() if not i.strip().startswith("#") and len(i.strip())])
         if not zones:
             logging.warning(f"Nothing to do! No zones loaded from {zones_filepath}")
             return []
@@ -80,8 +90,9 @@ async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Al
         logging.warning(f"Could not find the file '{zones_filepath}'.")
         return []
 
+
 async def main():
-    w_client = wapi.client
+    api_client = wapi.client
     tracker = AlertTracker()
     zones_file = os.path.join(SCRIPT_DIR, "zones.txt")
     active_alerts: list[wapi.Alert] | None = None
@@ -89,7 +100,7 @@ async def main():
     while True:
         # Get active alerts
         try:
-            active_alerts = await fetch_alerts(zones_file, w_client)
+            active_alerts = await fetch_alerts(zones_file, api_client)
         except aiohttp.ClientResponseError as e:
             logging.error("Got response error when fetching alerts.")
             print(e)
