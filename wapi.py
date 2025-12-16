@@ -62,11 +62,11 @@ class Feature:
 
         # Assign properties
         for k, v in properties.items():
-            # Rename the reserved keyword
-            if k == "@type":
-                self.type_name = v
-            else:
-                setattr(self, k, v)
+            match k:
+                case "@type":
+                    self.type_name = v
+                case _:
+                    setattr(self, k, v)
 
     def __repr__(self):
         return f"Feature(id='{self.id}')"
@@ -126,7 +126,7 @@ class Alert(Feature):
             # Remove linebreaks between letters/digits, commas, periods
             self.description = re.sub(r'(?<=[\w,.])[ \t]*[\r\n]+[ \t]*(?=[\w,.])', " ", self.description).strip()
         if self.instruction:
-            self.instruction = re.sub(r'(?<=[\w,.])[ \t]*[\r\n]+[ \t]*(?=[\w,.])', " ", self.instruction).strip()
+            self.instruction = re.sub(r'(?<=[\w,])[ \t]*[\r\n]+[ \t]*(?=[\w,])', " ", self.instruction).strip()
 
         # Convert date fields to datetime objects
         for field_name in ("sent", "effective", "onset", "expires", "ends"):
@@ -149,18 +149,18 @@ class Alert(Feature):
     def embed(self) -> discord.Embed:
         """ Discord message embed """
         color = self._alert_colors.get((self.severity, self.urgency))
-        if self.nws_headline is not None:
-            headline = "\n".join(self.nws_headline) + "\n"
+        if self.nws_headline:
+            headline = "\n".join(self.nws_headline) + "\n\n"
         else:
             headline = ""
 
-        description = (headline + self.description)
+        description = headline + self.description
 
         embed = discord.Embed(color=color, title=self.event,
                               description=description[:4096], timestamp=self.sent)
 
         # Include instructions if alert response calls for action
-        if self.instruction and self.response in ("Evacuate", "Execute", "Shelter"):
+        if self.instruction and self.response in ("Evacuate", "Execute", "Prepare", "Shelter"):
             embed.add_field(name="Instructions", value=self.instruction[:1024], inline=False)
 
         # Timestamp fields
@@ -194,6 +194,9 @@ class ClientAlerts:
 
     def __init__(self, parent):
         self.parent = parent
+
+    async def __call__(self, alert_id):
+        pass
 
     async def active(self, **params) -> FeatureCollection:
         """

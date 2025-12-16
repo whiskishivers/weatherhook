@@ -1,6 +1,6 @@
 ## Weatherhook
 
-Post U.S. weather alerts to your discord channel using Discord's built-in webhook URL functionality.
+Post U.S. weather alerts to your discord channel using Discord's built-in webhook functionality.
 
 ### Required packages
 * discordpy
@@ -14,9 +14,9 @@ Post U.S. weather alerts to your discord channel using Discord's built-in webhoo
 
 ### Features
 * Posts moderate, severe, and extreme alerts
-* Automatically deletes alerts that become inactive
+* Deletes inactive alert messages
 * Dynamic update interval based on alert urgency
-* Alert information is embedded with the chat message
+
 
 ### Zone IDs
 Forecast and county zone IDs can be searched for in files found here:

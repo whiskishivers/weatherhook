@@ -50,7 +50,6 @@ async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: w
         logging.warning(f"Could not delete {alert}")
         logging.warning(e.text)
 
-
 async def discord_sync(active_alerts: list, tracker: AlertTracker):
     """ Post new alerts and delete inactive alerts """
     async with aiohttp.ClientSession() as session:
@@ -71,7 +70,6 @@ async def discord_sync(active_alerts: list, tracker: AlertTracker):
 
         await asyncio.gather(*tasks)
 
-
 async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Alert]:
     """ Get active alerts from NWS API """
     try:
@@ -89,7 +87,6 @@ async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Al
     except FileNotFoundError:
         logging.warning(f"Could not find the file '{zones_filepath}'.")
         return []
-
 
 async def main():
     api_client = wapi.client
@@ -113,7 +110,7 @@ async def main():
 
             sleep_timer = random.uniform(-1.0, 0.0)
             if tracker.has_urgent():
-                sleep_timer += 60
+                sleep_timer += 60.0
             else:
                 sleep_timer += 300.0
             logging.info(f"Sleeping {sleep_timer:.2f}...")
