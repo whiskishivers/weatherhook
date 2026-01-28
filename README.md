@@ -19,7 +19,7 @@ Post U.S. weather alerts to your discord channel using Discord's built-in webhoo
 
 
 ### Zone IDs
-`allzones.csv` provides the ID, state, type, and name for all weather zones. You can also look up IDs in files found
+`all_zones.csv` provides the ID, state, type, and name for all weather zones. You can also look up IDs in files found
 below:
 * https://www.weather.gov/gis/publiczones
 * https://www.weather.gov/gis/ZoneCounty
