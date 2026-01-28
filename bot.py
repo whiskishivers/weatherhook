@@ -14,7 +14,7 @@ import wapi
 class AlertTracker(Dict[str, wapi.Alert]):
     """Dict wrapper for tracking active alerts."""
 
-    def compare(self, active_alerts: list):
+    def compare(self, active_alerts: list) -> tuple:
         """Determine which active alerts are new (not yet tracked) or expired (not in active alerts)."""
         new_ids = {alert.id for alert in active_alerts} - self.keys()
         new = [i for i in active_alerts if i.id in new_ids]
@@ -24,7 +24,7 @@ class AlertTracker(Dict[str, wapi.Alert]):
 
         return new, expired
 
-    def has_urgent(self):
+    def has_urgent_alerts(self) -> bool:
         """True if any urgent alerts are tracked"""
         return any(alert.urgency == "Immediate" or alert.severity == "Extreme" for alert in self.values())
 
@@ -45,10 +45,11 @@ async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: w
     try:
         await webhook.delete_message(int(alert.message_id))
         logging.info(f"Deleted: {alert}")
-        del tracker[alert.id]
     except discord.HTTPException as e:
         logging.warning(f"Could not delete {alert}")
         logging.warning(e.text)
+    finally:
+        del tracker[alert.id]
 
 async def discord_sync(active_alerts: list, tracker: AlertTracker):
     """ Post new alerts and delete inactive alerts """
@@ -108,8 +109,8 @@ async def main():
         try:
             await discord_sync(active_alerts, tracker)
 
-            sleep_timer = random.uniform(-1.0, 0.0)
-            if tracker.has_urgent():
+            sleep_timer = random.uniform(0.0, 1.0)
+            if tracker.has_urgent_alerts():
                 sleep_timer += 60.0
             else:
                 sleep_timer += 300.0

@@ -154,7 +154,7 @@ class Alert(Feature):
         else:
             headline = ""
 
-        description = headline + self.description
+        description = f"{headline}{self.description}"
 
         embed = discord.Embed(color=color, title=self.event,
                               description=description[:4096], timestamp=self.sent)

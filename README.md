@@ -19,7 +19,8 @@ Post U.S. weather alerts to your discord channel using Discord's built-in webhoo
 
 
 ### Zone IDs
-Forecast and county zone IDs can be searched for in files found here:
+`allzones.csv` provides the ID, state, type, and name for all weather zones. You can also look up IDs in files found
+below:
 * https://www.weather.gov/gis/publiczones
 * https://www.weather.gov/gis/ZoneCounty
 
