@@ -26,7 +26,7 @@ class AlertTracker(Dict[str, wapi.Alert]):
 
     def has_urgent_alerts(self) -> bool:
         """True if any urgent alerts are tracked"""
-        return any(alert.urgency == "Immediate" or alert.severity == "Extreme" for alert in self.values())
+        return any(alert.urgency == "Immediate" for alert in self.values())
 
 
 async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
@@ -82,7 +82,6 @@ async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Al
             return []
 
         alerts = await client.alerts.active(zone=zones, severity="Moderate,Severe,Extreme,Unknown")
-        alerts.sort(key=lambda x: (x.onset, x.sent))
         return alerts
 
     except FileNotFoundError:
