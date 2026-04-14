@@ -2,23 +2,81 @@ import datetime as dt
 import logging
 import re
 import time
-from dataclasses import dataclass, field, fields
-from typing import ClassVar
+from dataclasses import dataclass
+from typing import Dict, ClassVar
 
 import aiohttp
 import discord
 
 
+class FeatureCollection:
+
+    def __init__(self, title: str | None = None, features: list[Alert] | None = None):
+        self.title = title
+        self.features = features or []
+
+    @classmethod
+    def from_api(cls, data: dict) -> "FeatureCollection":
+        """ Convert raw response from a dict to an instance """
+        raw_features = data.get("features", [])
+        title = data.get("title")
+
+        features = [Feature.from_api(f) for f in raw_features]
+
+        return cls(title=title, features=features)
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, index):
+        return self.features[index]
+
+    def __iter__(self):
+        return iter(self.features)
+
 @dataclass
 class Feature:
-    """ Base object from API """
     id: str | None = None
-    type_name: str | None = None
+    wx_type: str | None = None
 
+    _registry: ClassVar[Dict] = {}
+
+    def __init_subclass__(cls, wx_type=None, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if wx_type:
+            Feature._registry[wx_type] = cls
+
+    @classmethod
+    def from_api(cls, data: dict):
+        """logic to route to the correct class"""
+        props = data.get("properties", {})
+        wx_type = props.get("@type")
+        target_class = Feature._registry.get(wx_type, cls)
+        return target_class._build(data, props)
+
+    @classmethod
+    def _build(cls, top_level: dict, props: dict):
+        """Base builder: extracts common fields"""
+        return cls(
+            id=top_level.get("id"),
+            wx_type=top_level.get("type")
+        )
 
 @dataclass(order=True)
-class Alert(Feature):
-    """ Represents a NWS alert """
+class Alert(Feature, wx_type="wx:Alert"):
+    description: str | None = None
+    event: str | None = None
+    ends: dt.datetime | str | None = None
+    headline: str | None = None
+    instruction: str | None = None
+    nws_headline: str | None = None
+    onset: dt.datetime | str | None = None
+    parameters: dict | None = None
+    response: str | None = None
+    sender_name: str | None = None
+    sent: dt.datetime | str | None = None
+    severity: str | None = None
+    urgency: str | None = None
     _alert_colors: ClassVar[dict] = {
         ("Severe", "Expected"): discord.Color.dark_gold(),
         ("Severe", "Future"): discord.Color.dark_gold(),
@@ -28,67 +86,32 @@ class Alert(Feature):
         ("Extreme", "Immediate"): discord.Color.red()
     }
 
-    event: str = ""
-    severity: str = ""
-    urgency: str = ""
-    # areaDesc: str = ""
-    description: str = ""
-    headline: str | None = None
-    instruction: str | None = None
-    response: str | None = None
-    senderName: str | None = None
-    sent: dt.datetime | str | None = None
-    onset: dt.datetime | str | None = None
-    # expires: dt.datetime | str | None = None
-    ends: dt.datetime | str | None = None
-    # effective: dt.datetime | str | None = None
-    parameters: dict = field(default_factory=dict)
-
-    # Internal Fields (calculated in __post_init__)
-    wmo: str | None = field(default=None, init=False)
-    nws_headline: list[str] | None = field(default=None, init=False)
-
     @classmethod
-    def from_api(cls, feature_dict: dict) -> "Alert":
-        """
-        Factory method: Creates an Alert instance from a single NWS 'feature' dictionary.
-        """
-        top_id = feature_dict.get("id")
-        properties = feature_dict.get("properties", {}).copy()
-
-        # Remove 'id' from properties to avoid "multiple values for keyword argument" error
-        properties.pop("id", None)
-
-        # 2. Filter properties to only those that exist in our dataclass fields
-        class_fields = {f.name for f in fields(cls)}
-        filtered_props = {k: v for k, v in properties.items() if k in class_fields}
-
-        return cls(id=top_id, **filtered_props)
+    def _build(cls, top_level: dict, props: dict):
+        """Subclass builder"""
+        return cls(
+            id=top_level.get("id"),
+            wx_type=top_level.get("type"),
+            description=props.get("description"),
+            ends=props.get("ends"),
+            event=props.get("event"),
+            headline=props.get("headline"),
+            instruction=props.get("instruction"),
+            nws_headline=props["parameters"].get("NWSheadline"),
+            onset=props.get("onset"),
+            parameters=props.get("parameters"),
+            response=props.get("response"),
+            sender_name=props.get("senderName"),
+            sent=props.get("sent"),
+            severity=props.get("severity"),
+            urgency=props.get("urgency")
+        )
 
     def __post_init__(self):
-        """
-        Standardizes types and formatting after the object is created.
-        """
-        self._parse_wmo()
+        """ Make date objects and clean up text for embeds """
         self._clean_text_fields()
-        self._convert_timestamps()
-
-        # Extract headlines if available in parameters
-        self.nws_headline = self.parameters.get("NWSheadline")
-
-    def __repr__(self):
-        return f"Alert(id={self.id}, event={self.event})"
-
-    def _parse_wmo(self):
-        """Extracts the WMO identifier from parameters."""
-        wmo_list = self.parameters.get("WMOidentifier", [])
-        if wmo_list and isinstance(wmo_list, list) and len(wmo_list) > 0:
-            try:
-                parts = wmo_list[0].split(" ")
-                if len(parts) >= 2:
-                    self.wmo = parts[1][-3:]
-            except (IndexError, AttributeError):
-                self.wmo = None
+        self._convert_date_fields()
+        self._parse_wmo_identifier()
 
     def _clean_text_fields(self):
         """Fixes NWS formatting quirks (excessive spaces and awkward linebreaks)."""
@@ -101,8 +124,10 @@ class Alert(Feature):
         self.description = clean(self.description)
         self.instruction = clean(self.instruction)
 
-    def _convert_timestamps(self):
-        """Converts date strings into datetime objects."""
+        if self.nws_headline:
+            self.nws_headline = "\n".join(self.nws_headline)
+
+    def _convert_date_fields(self):
         for field_name in ["sent", "onset", "ends"]:
             val = getattr(self, field_name)
             if isinstance(val, str):
@@ -111,12 +136,23 @@ class Alert(Feature):
                 except (ValueError, TypeError):
                     setattr(self, field_name, None)
 
+    def _parse_wmo_identifier(self):
+        """Extracts the WMO identifier from parameters."""
+        wmo_list = self.parameters.get("WMOidentifier", [])
+        if wmo_list and isinstance(wmo_list, list) and len(wmo_list) > 0:
+            try:
+                parts = wmo_list[0].split(" ")
+                if len(parts) >= 2:
+                    self.wmo = parts[1][-3:]
+            except (IndexError, AttributeError):
+                self.wmo = None
+
     @property
     def embed(self) -> discord.Embed:
-        """ Generates a Discord message embed for the alert. """
+        """ Discord message embed for the alert. """
         color = self._alert_colors.get((self.severity, self.urgency), discord.Color.blue())
 
-        prefix = "\n".join(self.nws_headline) + "\n\n" if self.nws_headline else ""
+        prefix = self.nws_headline + "\n\n" if self.nws_headline else ""
         full_desc = f"{prefix}{self.description}"
 
         embed = discord.Embed(
@@ -141,52 +177,10 @@ class Alert(Feature):
 
         if self.wmo:
             author_url = f"https://www.weather.gov/{self.wmo.lower()}"
-            embed.set_author(name=self.senderName or "NWS", url=author_url)
+            embed.set_author(name=self.sender_name or "NWS", url=author_url)
 
         return embed
 
-    @property
-    def embed_inactive(self) -> discord.Embed:
-        """ Embed style for expired or cancelled alerts. """
-        embed = discord.Embed(
-            title=self.event,
-            url=f"https://alerts.weather.gov/search?id={self.id}",
-            description="*This alert is no longer active.*"
-        )
-        if self.wmo:
-            author_url = f"https://www.weather.gov/{self.wmo.lower()}"
-            embed.set_author(name=self.senderName or "NWS", url=author_url)
-        return embed
-
-
-class FeatureCollection:
-
-    def __init__(self, title: str | None = None, features: list[Alert] | None = None):
-        self.title = title
-        self.features = features or []
-
-    @classmethod
-    def from_api_response(cls, data: dict) -> "FeatureCollection":
-        """ """
-        raw_features = data.get("features", [])
-        title = data.get("title")
-
-        alert_objects = [
-            Alert.from_api(f)
-            for f in raw_features
-            if f.get("properties", {}).get("@type") == "wx:Alert"
-        ]
-
-        return cls(title=title, features=alert_objects)
-
-    def __len__(self):
-        return len(self.features)
-
-    def __getitem__(self, index):
-        return self.features[index]
-
-    def __iter__(self):
-        return iter(self.features)
 
 
 class ClientAlerts:
@@ -198,7 +192,7 @@ class ClientAlerts:
     async def active(self, **params) -> FeatureCollection:
         """ Retrieves active NWS alerts. """
         response_data = await self.parent.get("alerts/active", params=params)
-        return FeatureCollection.from_api_response(response_data)
+        return FeatureCollection.from_api(response_data)
 
 
 class Client:

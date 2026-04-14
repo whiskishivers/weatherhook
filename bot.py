@@ -31,6 +31,10 @@ class AlertTracker(Dict[str, wapi.Alert]):
 
 async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
     """ Post message and add alert to tracker """
+    if IGNORE_WEBHOOK:
+        print(alert)
+        return
+
     try:
         message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, wait=True)
         logging.info(f"Posted: {alert}")
@@ -42,6 +46,9 @@ async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wap
 
 async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert) -> None:
     """ Delete message and remove alert from tracker """
+    if IGNORE_WEBHOOK:
+        print(alert)
+        return
     try:
         await webhook.delete_message(int(alert.message_id))
         logging.info(f"Deleted: {alert}")
@@ -124,6 +131,7 @@ if __name__ == "__main__":
     LOG_LVL = os.environ.get("LOG_LVL", "30")
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    IGNORE_WEBHOOK = False
 
     logging.basicConfig(level=int(LOG_LVL), format='%(asctime)s - %(levelname)s - %(message)s')
     if WEBHOOK_URL is None:
