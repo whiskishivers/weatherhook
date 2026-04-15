@@ -96,7 +96,7 @@ async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Al
         return []
 
 async def main():
-    api_client = wapi.client
+    nws_client = wapi.nws_client
     tracker = AlertTracker()
     zones_file = os.path.join(SCRIPT_DIR, "zones.txt")
     active_alerts: list[wapi.Alert] | None = None
@@ -104,7 +104,7 @@ async def main():
     while True:
         # Get active alerts
         try:
-            active_alerts = await fetch_alerts(zones_file, api_client)
+            active_alerts = await fetch_alerts(zones_file, nws_client)
         except aiohttp.ClientResponseError as e:
             logging.error("Got response error when fetching alerts.")
             print(e)

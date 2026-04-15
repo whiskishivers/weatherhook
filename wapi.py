@@ -10,8 +10,9 @@ import discord
 
 
 class FeatureCollection:
+    """ Collection of features provided by api """
 
-    def __init__(self, title: str | None = None, features: list[Alert] | None = None):
+    def __init__(self, title: str | None = None, features: list | None = None):
         self.title = title
         self.features = features or []
 
@@ -36,34 +37,34 @@ class FeatureCollection:
 
 @dataclass
 class Feature:
+    """ low level data object from api """
     id: str | None = None
     wx_type: str | None = None
 
     _registry: ClassVar[Dict] = {}
 
     def __init_subclass__(cls, wx_type=None, **kwargs):
+        """ Add a feature class to the registry upon run time """
         super().__init_subclass__(**kwargs)
         if wx_type:
             Feature._registry[wx_type] = cls
 
     @classmethod
-    def from_api(cls, data: dict):
-        """logic to route to the correct class"""
-        props = data.get("properties", {})
+    def from_api(cls, feature: dict):
+        """ Create class from feature registry """
+        props = feature.get("properties", {})
         wx_type = props.get("@type")
         target_class = Feature._registry.get(wx_type, cls)
-        return target_class._build(data, props)
+        return target_class._build(feature)
 
     @classmethod
-    def _build(cls, top_level: dict, props: dict):
+    def _build(cls, top_level: dict):
         """Base builder: extracts common fields"""
-        return cls(
-            id=top_level.get("id"),
-            wx_type=top_level.get("type")
-        )
+        return cls(id=top_level.get("id"))
 
 @dataclass(order=True)
 class Alert(Feature, wx_type="wx:Alert"):
+    """ NWS weather alert object """
     description: str | None = None
     event: str | None = None
     ends: dt.datetime | str | None = None
@@ -87,11 +88,12 @@ class Alert(Feature, wx_type="wx:Alert"):
     }
 
     @classmethod
-    def _build(cls, top_level: dict, props: dict):
-        """Subclass builder"""
+    def _build(cls, top_level: dict):
+        """Alert builder"""
+        props = top_level["properties"]
         return cls(
             id=top_level.get("id"),
-            wx_type=top_level.get("type"),
+            wx_type=props.get("@type"),
             description=props.get("description"),
             ends=props.get("ends"),
             event=props.get("event"),
@@ -108,13 +110,13 @@ class Alert(Feature, wx_type="wx:Alert"):
         )
 
     def __post_init__(self):
-        """ Make date objects and clean up text for embeds """
+        """ Cleans up inputs """
         self._clean_text_fields()
         self._convert_date_fields()
         self._parse_wmo_identifier()
 
     def _clean_text_fields(self):
-        """Fixes NWS formatting quirks (excessive spaces and awkward linebreaks)."""
+        """ Fixes NWS formatting quirks (excessive spaces and awkward linebreaks) """
 
         def clean(s):
             if not s: return s
@@ -128,6 +130,7 @@ class Alert(Feature, wx_type="wx:Alert"):
             self.nws_headline = "\n".join(self.nws_headline)
 
     def _convert_date_fields(self):
+        """ Datetime objects for date fields """
         for field_name in ["sent", "onset", "ends"]:
             val = getattr(self, field_name)
             if isinstance(val, str):
@@ -137,7 +140,7 @@ class Alert(Feature, wx_type="wx:Alert"):
                     setattr(self, field_name, None)
 
     def _parse_wmo_identifier(self):
-        """Extracts the WMO identifier from parameters."""
+        """ Extracts the WMO office identifier from parameters """
         wmo_list = self.parameters.get("WMOidentifier", [])
         if wmo_list and isinstance(wmo_list, list) and len(wmo_list) > 0:
             try:
@@ -149,7 +152,7 @@ class Alert(Feature, wx_type="wx:Alert"):
 
     @property
     def embed(self) -> discord.Embed:
-        """ Discord message embed for the alert. """
+        """ Discord message embed object """
         color = self._alert_colors.get((self.severity, self.urgency), discord.Color.blue())
 
         prefix = self.nws_headline + "\n\n" if self.nws_headline else ""
@@ -184,19 +187,19 @@ class Alert(Feature, wx_type="wx:Alert"):
 
 
 class ClientAlerts:
-    """Resource accessor for NWS Alerts."""
+    """ Resource accessor for NWS Alerts """
 
     def __init__(self, parent: 'Client'):
         self.parent = parent
 
     async def active(self, **params) -> FeatureCollection:
-        """ Retrieves active NWS alerts. """
+        """ Retrieves active NWS alerts """
         response_data = await self.parent.get("alerts/active", params=params)
         return FeatureCollection.from_api(response_data)
 
 
 class Client:
-    """ Main API Client for NWS. """
+    """ Main API Client for NWS """
 
     def __init__(self):
         self.headers = {"User-Agent": "python-aiohttp | Discord weather bot"}
@@ -224,4 +227,4 @@ class Client:
             await self.session.close()
 
 
-client = Client()
+nws_client = Client()
