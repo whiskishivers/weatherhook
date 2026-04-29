@@ -62,9 +62,10 @@ class Feature:
         """Base builder: extracts common fields"""
         return cls(id=top_level.get("id"))
 
-@dataclass(order=True)
+@dataclass
 class Alert(Feature, wx_type="wx:Alert"):
     """ NWS weather alert object """
+    discord_msg_id: int | None = None
     description: str | None = None
     event: str | None = None
     ends: dt.datetime | str | None = None
@@ -99,7 +100,7 @@ class Alert(Feature, wx_type="wx:Alert"):
             event=props.get("event"),
             headline=props.get("headline"),
             instruction=props.get("instruction"),
-            nws_headline=props["parameters"].get("NWSheadline"),
+            nws_headline=props.get("parameters", {}).get("NWSheadline"),
             onset=props.get("onset"),
             parameters=props.get("parameters"),
             response=props.get("response"),
@@ -141,6 +142,10 @@ class Alert(Feature, wx_type="wx:Alert"):
 
     def _parse_wmo_identifier(self):
         """ Extracts the WMO office identifier from parameters """
+        self.wmo = None
+        if not self.parameters:
+            return
+
         wmo_list = self.parameters.get("WMOidentifier", [])
         if wmo_list and isinstance(wmo_list, list) and len(wmo_list) > 0:
             try:
@@ -174,7 +179,7 @@ class Alert(Feature, wx_type="wx:Alert"):
 
         if isinstance(self.ends, dt.datetime):
             ts = int(self.ends.timestamp())
-            embed.add_field(name="End", value=f"<t:{ts}:d> <t:{ts}:t>")
+            embed.add_field(name="End", value=f"<t:{ts}:d> <t:{ts}:t>\n<t:{ts}:R>")
 
         embed.add_field(name="Severity", value=f"{self.severity} - {self.urgency}")
 

@@ -11,7 +11,7 @@ import discord
 import wapi
 
 
-class AlertTracker(Dict[str, wapi.Alert]):
+class AlertTracker(dict):
     """Dict wrapper for tracking active alerts."""
 
     def compare(self, active_alerts: list) -> tuple:
@@ -30,33 +30,27 @@ class AlertTracker(Dict[str, wapi.Alert]):
 
 
 async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
-    """ Post message and add alert to tracker """
-    if IGNORE_WEBHOOK:
-        print(alert)
-        return
-
+    """ Post discord message and track the alert """
     try:
         message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, wait=True)
         logging.info(f"Posted: {alert}")
-        alert.message_id = message.id
+        alert.discord_msg_id = message.id
         tracker[alert.id] = alert
     except discord.HTTPException as e:
         logging.warning(f"Could not post {alert}")
         logging.warning(e.text)
 
 async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert) -> None:
-    """ Delete message and remove alert from tracker """
+    """ Delete message """
     if IGNORE_WEBHOOK:
         print(alert)
         return
     try:
-        await webhook.delete_message(int(alert.message_id))
+        await webhook.delete_message(int(alert.discord_msg_id))
         logging.info(f"Deleted: {alert}")
     except discord.HTTPException as e:
         logging.warning(f"Could not delete {alert}")
         logging.warning(e.text)
-    finally:
-        del tracker[alert.id]
 
 async def discord_sync(active_alerts: list, tracker: AlertTracker):
     """ Post new alerts and delete inactive alerts """
@@ -68,6 +62,7 @@ async def discord_sync(active_alerts: list, tracker: AlertTracker):
         # Delete old alerts
         for alert in expired_alerts:
             tasks.append(delete_alert(tracker, webhook, alert))
+            tracker.pop(alert.id)
 
         # Post new alerts
         for alert in new_alerts:
@@ -89,7 +84,7 @@ async def fetch_alerts(zones_filepath: str, client: wapi.Client) -> List[wapi.Al
             return []
 
         alerts = await client.alerts.active(zone=zones, severity="Moderate,Severe,Extreme,Unknown")
-        return alerts
+        return sorted(alerts, key=lambda x:x.sent)
 
     except FileNotFoundError:
         logging.warning(f"Could not find the file '{zones_filepath}'.")
@@ -99,9 +94,9 @@ async def main():
     nws_client = wapi.nws_client
     tracker = AlertTracker()
     zones_file = os.path.join(SCRIPT_DIR, "zones.txt")
-    active_alerts: list[wapi.Alert] | None = None
 
     while True:
+        active_alerts = None
         # Get active alerts
         try:
             active_alerts = await fetch_alerts(zones_file, nws_client)
@@ -111,10 +106,14 @@ async def main():
         except aiohttp.ConnectionTimeoutError:
             logging.error(f"Connection timed out when fetching alerts.")
 
+        if active_alerts is None:
+            logging.info(f"Error retrieving active alerts. Trying again in 30 seconds.")
+            await asyncio.sleep(30.0)
+            continue
+
         # Synchronize tracked alerts and adjust sleep timer based on alert urgency
         try:
             await discord_sync(active_alerts, tracker)
-
             sleep_timer = random.uniform(0.0, 1.0)
             if tracker.has_urgent_alerts():
                 sleep_timer += 60.0
