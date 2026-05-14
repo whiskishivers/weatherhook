@@ -116,13 +116,15 @@ class Alert(Feature, wx_type="wx:Alert"):
         self._convert_date_fields()
         self._parse_wmo_identifier()
 
+    def __repr__(self):
+        return f"Alert(event={self.event})"
+
     def _clean_text_fields(self):
         """ Fixes NWS formatting quirks (excessive spaces and awkward linebreaks) """
-
         def clean(s):
             if not s: return s
             s = re.sub(r"\s{4,}", ", ", s).strip()
-            return re.sub(r'(?<=[\w,])[ \t]*[\r\n]+[ \t]*(?=[\w,])', " ", s).strip()
+            return re.sub(r'(?<=\w)[ \t]*[\r\n]+[ \t]*(?=\w)', " ", s).strip()
 
         self.description = clean(self.description)
         self.instruction = clean(self.instruction)

@@ -7,7 +7,7 @@ Post U.S. weather alerts to your discord channel using Discord's built-in webhoo
 * aiohttp
 
 ### Setup
-1. Modify the `zones.txt` file in the script directory with one forecast/county zone ID per line.
+1. Modify `config.yaml` to add zones and severity filters. At least one zone is required.
 2. Set `WEBHOOK_URL` environment variable to your channel's webhook url.
    Webhooks can be created through Discord -> Server Settings -> Integrations -> Webhooks.
 3. Run bot.py.
@@ -24,4 +24,5 @@ below:
 * https://www.weather.gov/gis/publiczones
 * https://www.weather.gov/gis/ZoneCounty
 
-
+Disclaimer: This project is not affiliated with, endorsed by, or an official product of the National Weather
+Service (NWS). It is an independent application that utilizes the public NWS API to provide weather information.

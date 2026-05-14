@@ -1,0 +1,14 @@
+filter:
+  zones:
+    - COC123  # Add more zone IDs as needed. At least one zone is required.
+
+  severity:   # Unknown, Minor, Moderate, Severe, Extreme
+    - Moderate
+    - Severe
+    - Extreme
+
+log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+
+sleep_interval:
+  normal: 300.0  # seconds
+  urgent: 60.0
