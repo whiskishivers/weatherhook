@@ -1,9 +1,8 @@
 import datetime as dt
 import logging
 import re
-import time
 from dataclasses import dataclass
-from typing import Dict, ClassVar
+from typing import Dict, ClassVar, List
 
 import aiohttp
 import discord
@@ -130,7 +129,10 @@ class Alert(Feature, wx_type="wx:Alert"):
         self.instruction = clean(self.instruction)
 
         if self.nws_headline:
-            self.nws_headline = "\n".join(self.nws_headline)
+            if isinstance(self.nws_headline, list):
+                self.nws_headline = "\n".join(self.nws_headline)
+            else:
+                self.nws_headline = str(self.nws_headline)
 
     def _convert_date_fields(self):
         """ Datetime objects for date fields """
@@ -171,7 +173,6 @@ class Alert(Feature, wx_type="wx:Alert"):
             color=color,
             timestamp=self.sent if isinstance(self.sent, dt.datetime) else None
         )
-
         if self.instruction and self.response in ("Evacuate", "Execute", "Prepare", "Shelter"):
             embed.add_field(name="Instructions", value=self.instruction[:1024], inline=False)
 
@@ -199,10 +200,10 @@ class ClientAlerts:
     def __init__(self, parent: 'Client'):
         self.parent = parent
 
-    async def active(self, **params) -> FeatureCollection:
+    async def active(self, **params) -> List[Alert]:
         """ Retrieves active NWS alerts """
         response_data = await self.parent.get("alerts/active", params=params)
-        return FeatureCollection.from_api(response_data)
+        return list(FeatureCollection.from_api(response_data))
 
 
 class Client:
@@ -224,7 +225,8 @@ class Client:
 
         async with self.session.get(url, params=params) as resp:
             logging.debug(f"GET {resp.url}")
-            print(f"{time.strftime('%H:%M:%S')} API GET {resp.status} {resp.reason}")
+            if resp.status != 200:
+                logging.warning(f"API GET {resp.status} {resp.reason} — {resp.url}")
             resp.raise_for_status()
             return await resp.json()
 

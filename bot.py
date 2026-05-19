@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 import wapi
 import yaml
+import store
 
 
 class Config(NamedTuple):
@@ -44,9 +45,9 @@ def load_config(config_filepath: str) -> Config:
     with open(config_filepath, "r") as f:
         config = yaml.safe_load(f)
 
-    zones = ",".join(config["filter"]["zones"])
+    zones = ",".join(config["zones"])
 
-    raw_severity = config["filter"].get("severity")
+    raw_severity = config.get("severity")
     severity = ",".join(raw_severity) if raw_severity else ""
 
     raw_log_level = config.get("log_level", "WARNING")
@@ -63,31 +64,33 @@ def load_config(config_filepath: str) -> Config:
     )
 
 
-async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert):
+async def post_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert, db_path: str):
     """Post discord message and track the alert."""
     try:
         message = await webhook.send(content=f"{alert.headline}", embed=alert.embed, wait=True)
         print(f"[{time.strftime('%H:%M:%S')}] [+] Posted  : {alert.headline}")
-        logging.info(f"Posted: {alert}")
         alert.discord_msg_id = message.id
         tracker[alert.id] = alert
+        await store.save_alert(db_path, alert)
     except discord.HTTPException as e:
         print(f"[{time.strftime('%H:%M:%S')}] [!] Failed to post: {alert.headline} — {e.text}")
         logging.warning(f"Could not post {alert}: {e.text}")
 
 
-async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert) -> None:
-    """Delete message."""
+async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: wapi.Alert, db_path: str) -> None:
+    """Delete discord message and remove alert from the database."""
     try:
         await webhook.delete_message(int(alert.discord_msg_id))
-        print(f"[{time.strftime('%H:%M:%S')}] [-] Expired : {alert.headline}")
-        logging.info(f"Deleted: {alert}")
+        print(f"[{time.strftime('%H:%M:%S')}] [-] Deleted : {alert.headline}")
     except discord.HTTPException as e:
         print(f"[{time.strftime('%H:%M:%S')}] [!] Failed to delete: {alert.headline} — {e.text}")
         logging.warning(f"Could not delete {alert}: {e.text}")
+    finally:
+        # Always remove from DB so a failed delete isn't retried forever
+        await store.remove_alert(db_path, alert.id)
 
 
-async def discord_sync(active_alerts: list, tracker: AlertTracker):
+async def discord_sync(active_alerts: list, tracker: AlertTracker, db_path: str):
     """Post new alerts and delete inactive alerts."""
     async with aiohttp.ClientSession() as session:
         webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
@@ -95,11 +98,11 @@ async def discord_sync(active_alerts: list, tracker: AlertTracker):
         new_alerts, expired_alerts = tracker.compare(active_alerts)
 
         for alert in expired_alerts:
-            tasks.append(delete_alert(tracker, webhook, alert))
+            tasks.append(delete_alert(tracker, webhook, alert, db_path))
             tracker.pop(alert.id)
 
         for alert in new_alerts:
-            tasks.append(post_alert(tracker, webhook, alert))
+            tasks.append(post_alert(tracker, webhook, alert, db_path))
 
         await asyncio.gather(*tasks)
 
@@ -119,8 +122,13 @@ async def fetch_alerts(config: Config, client: wapi.Client) -> List[wapi.Alert]:
 
 async def main():
     nws_client = wapi.nws_client
-    tracker = AlertTracker()
     config_file = os.path.join(SCRIPT_DIR, "config.yaml")
+    db_path = os.path.join(SCRIPT_DIR, store.DB_FILENAME)
+
+    await store.init_db(db_path)
+    tracker = AlertTracker(await store.load_alerts(db_path))
+    if tracker:
+        print(f"[startup] Restored {len(tracker)} alert(s) from previous session.")
 
     while True:
         # Reload config on every poll to pick up live edits
@@ -156,20 +164,23 @@ async def main():
 
         # Synchronize tracked alerts and adjust sleep timer based on alert urgency
         try:
-            await discord_sync(active_alerts, tracker)
+            await discord_sync(active_alerts, tracker, db_path)
             tracked = len(tracker)
             urgent = tracker.has_urgent_alerts()
             if tracker.has_urgent_alerts():
                 sleep_timer = config.sleep_urgent + random.uniform(0.0, 1.0)
             else:
                 sleep_timer = config.sleep_normal + random.uniform(0.0, 1.0)
-            status = "URGENT" if urgent else "normal"
+            status = "urgent" if urgent else "normal"
             print(f"[{time.strftime('%H:%M:%S')}] Tracking {tracked} alert(s). Next poll in {sleep_timer:.0f}s [{status}].")
             logging.info(f"Sleeping {sleep_timer:.2f}...")
             await asyncio.sleep(sleep_timer)
 
         except asyncio.CancelledError:
             break
+
+    await nws_client.close()
+    print(f"[{time.strftime('%H:%M:%S')}] Bot shut down.")
 
 
 if __name__ == "__main__":
@@ -196,7 +207,7 @@ if __name__ == "__main__":
     config_file = os.path.join(SCRIPT_DIR, "config.yaml")
     try:
         _cfg = load_config(config_file)
-        print(f"[startup] NWS Alert Bot starting.")
+        print(f"[startup] Weatherhook starting.")
         print(f"[startup] Zones    : {_cfg.zones}")
         print(f"[startup] Severity : {_cfg.severity}")
         print(f"[startup] Poll interval — normal: {_cfg.sleep_normal}s  urgent: {_cfg.sleep_urgent}s")

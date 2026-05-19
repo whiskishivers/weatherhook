@@ -1,13 +1,15 @@
-filter:
-  zones:
-    - COC123  # Add more zone IDs as needed. At least one zone is required.
+zones:
+  # Add more zone IDs as needed. At least one zone is required.
+  - TXC235
 
-  severity:   # Unknown, Minor, Moderate, Severe, Extreme
-    - Moderate
-    - Severe
-    - Extreme
+severity:   # Unknown, Minor, Moderate, Severe, Extreme
+  #- Unknown
+  #- Minor
+  - Moderate
+  - Severe
+  - Extreme
 
-log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+log_level: WARNING  # DEBUG, INFO, WARNING, ERROR
 
 sleep_interval:
   normal: 300.0  # seconds

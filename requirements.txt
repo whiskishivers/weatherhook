@@ -1,2 +1,5 @@
 aiohttp~=3.10.10
 discord.py~=2.4.0
+PyYAML~=6.0.3
+python-dotenv~=1.2.2
+aiosqlite~=0.22.1
