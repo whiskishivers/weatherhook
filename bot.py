@@ -86,7 +86,6 @@ async def delete_alert(tracker: AlertTracker, webhook: discord.Webhook, alert: w
         print(f"[{time.strftime('%H:%M:%S')}] [!] Failed to delete: {alert.headline} — {e.text}")
         logging.warning(f"Could not delete {alert}: {e.text}")
     finally:
-        # Always remove from DB so a failed delete isn't retried forever
         await store.remove_alert(db_path, alert.id)
 
 
@@ -131,7 +130,6 @@ async def main():
         print(f"[startup] Restored {len(tracker)} alert(s) from previous session.")
 
     while True:
-        # Reload config on every poll to pick up live edits
         try:
             config = load_config(config_file)
         except FileNotFoundError:
@@ -143,7 +141,6 @@ async def main():
             await asyncio.sleep(30.0)
             continue
 
-        # Apply log level from config
         logging.getLogger().setLevel(config.log_level)
 
         # Get active alerts
