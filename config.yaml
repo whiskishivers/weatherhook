@@ -1,9 +1,11 @@
 log_level: WARNING
-severity: null
+severity: # Minor, Moderate, Severe, Extreme, Unknown
+- Moderate
+- Severe
+- Extreme
 sleep_interval:
   normal: 300.0
   urgent: 60.0
 status_api: true
-zones:
-- VAC800
-- VAZ096
+zones: # Public, county and/or fire zone IDs. see all_zones.csv or use the web UI
+- TXC001
