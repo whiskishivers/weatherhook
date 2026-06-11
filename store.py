@@ -16,7 +16,13 @@ async def init_db(db_path: str) -> None:
             CREATE TABLE IF NOT EXISTS alerts (
                 alert_id       TEXT PRIMARY KEY,
                 discord_msg_id INTEGER NOT NULL,
-                headline       TEXT
+                headline       TEXT,
+                event          TEXT,
+                severity       TEXT,
+                urgency        TEXT,
+                sender_name    TEXT,
+                onset          TEXT,
+                ends           TEXT
             )
         """)
         await db.commit()
@@ -27,12 +33,29 @@ async def init_db(db_path: str) -> None:
 
 async def load_alerts(db_path: str) -> dict[str, wapi.Alert]:
     """Load persisted alerts from the database into a dict keyed by alert ID."""
+    import datetime as dt
     tracked = {}
     async with aiosqlite.connect(db_path) as db:
-        async with db.execute("SELECT alert_id, discord_msg_id, headline FROM alerts") as cursor:
+        async with db.execute(
+            "SELECT alert_id, discord_msg_id, headline, event, severity, urgency, sender_name, onset, ends FROM alerts"
+        ) as cursor:
             async for row in cursor:
-                alert_id, discord_msg_id, headline = row
-                alert = wapi.Alert(id=alert_id, headline=headline)
+                alert_id, discord_msg_id, headline, event, severity, urgency, sender_name, onset, ends = row
+                alert = wapi.Alert(
+                    id=alert_id,
+                    headline=headline,
+                    event=event,
+                    severity=severity,
+                    urgency=urgency,
+                    sender_name=sender_name,
+                )
+                # onset/ends are stored as ISO strings; restore as datetime objects
+                for field, val in [("onset", onset), ("ends", ends)]:
+                    if val:
+                        try:
+                            setattr(alert, field, dt.datetime.fromisoformat(val))
+                        except ValueError:
+                            pass
                 alert.discord_msg_id = discord_msg_id
                 tracked[alert_id] = alert
     return tracked
@@ -40,11 +63,19 @@ async def load_alerts(db_path: str) -> dict[str, wapi.Alert]:
 
 async def save_alert(db_path: str, alert: wapi.Alert) -> None:
     """Persist a newly posted alert to the database."""
+    import datetime as dt
+    def iso(v):
+        return v.isoformat() if isinstance(v, dt.datetime) else None
+
     try:
         async with aiosqlite.connect(db_path) as db:
             await db.execute(
-                "INSERT OR REPLACE INTO alerts (alert_id, discord_msg_id, headline) VALUES (?, ?, ?)",
-                (alert.id, alert.discord_msg_id, alert.headline),
+                """INSERT OR REPLACE INTO alerts
+                   (alert_id, discord_msg_id, headline, event, severity, urgency, sender_name, onset, ends)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (alert.id, alert.discord_msg_id, alert.headline,
+                 alert.event, alert.severity, alert.urgency, alert.sender_name,
+                 iso(alert.onset), iso(alert.ends)),
             )
             await db.commit()
     except aiosqlite.Error as e:

@@ -1,17 +1,18 @@
 import asyncio
+import json
 import logging
 import os
 import random
 import time
-from typing import Dict, List, NamedTuple
+from typing import List, NamedTuple
 
 import aiohttp
 import discord
+import yaml
 from dotenv import load_dotenv
 
-import wapi
-import yaml
 import store
+import wapi
 
 
 class Config(NamedTuple):
@@ -20,6 +21,7 @@ class Config(NamedTuple):
     log_level: int
     sleep_normal: float
     sleep_urgent: float
+    status_api: bool
 
 
 class AlertTracker(dict):
@@ -54,6 +56,7 @@ def load_config(config_filepath: str) -> Config:
     log_level = getattr(logging, str(raw_log_level).upper(), logging.WARNING)
     sleep_normal = float(config["sleep_interval"]["normal"])
     sleep_urgent = float(config["sleep_interval"]["urgent"])
+    status_api = bool(config.get("status_api", True))
 
     return Config(
         zones=zones,
@@ -61,6 +64,7 @@ def load_config(config_filepath: str) -> Config:
         log_level=log_level,
         sleep_normal=sleep_normal,
         sleep_urgent=sleep_urgent,
+        status_api=status_api,
     )
 
 
@@ -119,10 +123,50 @@ async def fetch_alerts(config: Config, client: wapi.Client) -> List[wapi.Alert]:
     return sorted(alerts, key=lambda x: x.sent)
 
 
+def write_status(status_path: str, tracker: AlertTracker, next_poll_ts: float | None, poll_status: str) -> None:
+    """Write bot runtime status to a JSON file for the web UI to read."""
+    def fmt_dt(dt) -> str | None:
+        import datetime as _dt
+        if isinstance(dt, _dt.datetime):
+            return dt.isoformat()
+        return None
+
+    tracked = [
+        {
+            "id":          alert.id,
+            "event":       alert.event,
+            "headline":    alert.headline,
+            "severity":    alert.severity,
+            "urgency":     alert.urgency,
+            "sender_name": alert.sender_name,
+            "onset":       fmt_dt(alert.onset),
+            "ends":        fmt_dt(alert.ends),
+        }
+        for alert in tracker.values()
+    ]
+
+    payload = {
+        "running":       poll_status != "disabled",
+        "as_of":         time.time(),
+        "next_poll":     next_poll_ts,
+        "poll_status":   poll_status,   # "normal" | "urgent" | "error" | "disabled"
+        "tracked":       tracked,
+    }
+
+    tmp = status_path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp, status_path)   # atomic on POSIX
+    except OSError as e:
+        logging.warning(f"Could not write status file: {e}")
+
+
 async def main():
     nws_client = wapi.nws_client
     config_file = os.path.join(SCRIPT_DIR, "config.yaml")
     db_path = os.path.join(SCRIPT_DIR, store.DB_FILENAME)
+    status_path = os.path.join(SCRIPT_DIR, "status.json")
 
     await store.init_db(db_path)
     tracker = AlertTracker(await store.load_alerts(db_path))
@@ -130,6 +174,7 @@ async def main():
         print(f"[startup] Restored {len(tracker)} alert(s) from previous session.")
 
     while True:
+        loop_start = time.monotonic()
         try:
             config = load_config(config_file)
         except FileNotFoundError:
@@ -155,8 +200,9 @@ async def main():
             logging.error("Connection timed out when fetching alerts.")
 
         if active_alerts is None:
+            write_status(status_path, tracker, time.time() + 30.0, "error") if config.status_api else write_status(status_path, tracker, None, "disabled")
             print(f"[{time.strftime('%H:%M:%S')}] [!] Could not retrieve alerts. Retrying in 30s.")
-            await asyncio.sleep(30.0)
+            await asyncio.sleep(30.0 + random.uniform(0.0, 1.0))
             continue
 
         # Synchronize tracked alerts and adjust sleep timer based on alert urgency
@@ -164,35 +210,47 @@ async def main():
             await discord_sync(active_alerts, tracker, db_path)
             tracked = len(tracker)
             urgent = tracker.has_urgent_alerts()
-            if tracker.has_urgent_alerts():
-                sleep_timer = config.sleep_urgent + random.uniform(0.0, 1.0)
-            else:
-                sleep_timer = config.sleep_normal + random.uniform(0.0, 1.0)
+
+            # sleep calculation
+            base_sleep = config.sleep_urgent if urgent else config.sleep_normal
+            elapsed = time.monotonic() - loop_start
+            sleep_timer = max(5.0, base_sleep - elapsed)
+
+            next_poll_ts = time.time() + sleep_timer
             status = "urgent" if urgent else "normal"
-            print(f"[{time.strftime('%H:%M:%S')}] Tracking {tracked} alert(s). Next poll in {sleep_timer:.0f}s [{status}].")
+            write_status(status_path, tracker, next_poll_ts, status) if config.status_api else write_status(status_path, tracker, None, "disabled")
+
+            next_poll = time.strftime('%H:%M:%S', time.localtime(next_poll_ts))
+            print(f"[{time.strftime('%H:%M:%S')}] Tracking {tracked} alert(s). Next poll at {next_poll} [{status}].")
             logging.info(f"Sleeping {sleep_timer:.2f}...")
+
             await asyncio.sleep(sleep_timer)
 
         except asyncio.CancelledError:
             break
 
     await nws_client.close()
+    # Mark bot as offline in status file
+    try:
+        with open(status_path, "w") as f:
+            json.dump({"running": False, "as_of": time.time()}, f)
+    except OSError:
+        pass
     print(f"[{time.strftime('%H:%M:%S')}] Bot shut down.")
 
 
 if __name__ == "__main__":
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    # Load .env from the project directory
+    # Load .env, get webhook url
     env_path = os.path.join(SCRIPT_DIR, ".env")
     if not os.path.exists(env_path):
         print(f"[FATAL] .env file not found at {env_path}")
+        logging.critical(".env file is missing.")
         raise SystemExit(1)
     load_dotenv(env_path)
-
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-    # Bootstrap logging at WARNING until config is loaded on first loop iteration
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
 
     if WEBHOOK_URL is None:
@@ -209,6 +267,7 @@ if __name__ == "__main__":
         print(f"[startup] Severity : {_cfg.severity}")
         print(f"[startup] Poll interval — normal: {_cfg.sleep_normal}s  urgent: {_cfg.sleep_urgent}s")
         print(f"[startup] Log level: {logging.getLevelName(_cfg.log_level)}")
+        print(f"[startup] Status API: {'enabled' if _cfg.status_api else 'disabled'}")
     except Exception as e:
         print(f"[FATAL] Could not load config at startup: {e}")
         raise SystemExit(1)

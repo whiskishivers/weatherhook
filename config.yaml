@@ -1,16 +1,9 @@
-zones:
-  # Add more zone IDs as needed. At least one zone is required.
-  - TXC235
-
-severity:   # Unknown, Minor, Moderate, Severe, Extreme
-  #- Unknown
-  #- Minor
-  - Moderate
-  - Severe
-  - Extreme
-
-log_level: WARNING  # DEBUG, INFO, WARNING, ERROR
-
+log_level: WARNING
+severity: null
 sleep_interval:
-  normal: 300.0  # seconds
+  normal: 300.0
   urgent: 60.0
+status_api: true
+zones:
+- VAC800
+- VAZ096
