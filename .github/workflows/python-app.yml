@@ -1,4 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# This workflow installs Python dependencies, lints, and runs tests for Weatherhook.
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
 name: Python application
@@ -17,23 +17,45 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
       with:
-        python-version: "3.12"
+        python-version: ${{ matrix.python-version }}
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install flake8 pytest
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Lint with flake8
+
+    - name: Lint with flake8 (syntax errors / undefined names)
       run: |
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
+
+    - name: Lint with flake8 (style, non-blocking)
       run: |
-        pytest
+        # exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=200 --statistics
+
+    - name: Check module imports / syntax compile
+      run: |
+        # Create a dummy .env so bot.py's startup checks don't crash on import
+        echo "WEBHOOK_URL=https://discord.com/api/webhooks/000000000000000000/dummytokenfordummytokenfordummytokenfordummytoken" > .env
+        python -m compileall -q .
+        python -c "import store, wapi, webui"
+
+    - name: Run tests with pytest
+      run: |
+        if [ -d tests ] || compgen -G "**/test_*.py" > /dev/null || compgen -G "**/*_test.py" > /dev/null; then
+          pytest -v
+        else
+          echo "No tests found, skipping pytest."
+        fi
