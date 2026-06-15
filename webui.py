@@ -9,6 +9,7 @@ import csv
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+import html
 
 import yaml
 
@@ -46,12 +47,12 @@ def load_zones():
 
     zones = []
     for (state, id_), v in sorted(raw.items(), key=lambda x: (x[0][0], x[0][1])):
-        types = [t for t in _TYPE_ORDER if t in v["types"]]  # stable display order
+        types = [html.escape(t) for t in _TYPE_ORDER if t in v["types"]]  # stable display order
         zones.append({
-            "id":    id_,
-            "state": state,
+            "id":    html.escape(id_),
+            "state": html.escape(state),
             "types": types,
-            "name":  v["name"],
+            "name":  html.escape(v["name"]),
         })
     return zones
 
@@ -599,11 +600,10 @@ HTML = r"""<!DOCTYPE html>
         </div>
         <div id="alert-list"></div>
         <label class="sev-row" style="margin-top:12px;" id="status-api-row">
-          <input type="checkbox" id="status-api" checked onchange="updateStatusApiNote()">
+          <input type="checkbox" id="status-api" checked">
           <div class="sev-dot" style="background:var(--success)"></div>
           <span class="sev-label">Enable status API</span>
         </label>
-        <p class="section-note" id="status-api-note">Bot writes status.json so the web UI can display live status.</p>
       </div>
     </div>
 
@@ -658,7 +658,7 @@ HTML = r"""<!DOCTYPE html>
   </div>
 
   <div class="save-bar">
-    <button class="btn-save" id="save-btn" onclick="saveConfig()">Save config.yaml</button>
+    <button class="btn-save" id="save-btn" onclick="saveConfig()">Save config</button>
     <span id="status-msg"></span>
   </div>
 </div>
@@ -780,13 +780,6 @@ function renderSev() {
 function toggleSev(s, on) {
   if (on && !activeSev.includes(s)) activeSev.push(s);
   if (!on) activeSev = activeSev.filter(x => x !== s);
-}
-
-function updateStatusApiNote() {
-  const on = document.getElementById('status-api').checked;
-  document.getElementById('status-api-note').textContent = on
-    ? 'Bot writes status.json so the web UI can display live status.'
-    : 'Status API disabled — bot will not write status.json.';
 }
 
 // ── Save ──
@@ -949,7 +942,6 @@ document.getElementById('sleep-normal').value = __SLEEP_NORMAL__;
 document.getElementById('sleep-urgent').value = __SLEEP_URGENT__;
 document.getElementById('log-level').value    = '__LOG_LEVEL__';
 document.getElementById('status-api').checked = __STATUS_API__;
-updateStatusApiNote();
 </script>
 
   <footer>
