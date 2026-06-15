@@ -122,8 +122,13 @@ class Alert(Feature, wx_type="wx:Alert"):
         """ Fixes NWS formatting quirks (excessive spaces and awkward linebreaks) """
         def clean(s):
             if not s: return s
-            s = re.sub(r"\s{4,}", ", ", s).strip()
-            return re.sub(r'(?<=\w)[ \t]*[\r\n]+[ \t]*(?=\w)', " ", s).strip()
+            # Collapse 4+ spaces on the SAME line into a comma (preserve newlines)
+            s = re.sub(r"[ \t]{4,}", ", ", s)
+            # Collapse multiple blank lines into a single newline
+            s = re.sub(r'\n{3,}', '\n\n', s)
+            # Join lines that are mid-sentence (no punctuation at line end)
+            s = re.sub(r'(?<=[^\.\!\?\:\n])[ \t]*\n[ \t]*(?=[a-z])', ' ', s)
+            return s.strip()
 
         self.description = clean(self.description)
         self.instruction = clean(self.instruction)
