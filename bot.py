@@ -147,8 +147,8 @@ def write_status(status_path: str, tracker: AlertTracker, next_poll_ts: float | 
 
     payload = {
         "running":       poll_status != "disabled",
-        "as_of":         time.time(),
-        "next_poll":     next_poll_ts,
+        "as_of":         int(time.time()),
+        "next_poll":     int(next_poll_ts) if next_poll_ts is not None else None,
         "poll_status":   poll_status,   # "normal" | "urgent" | "error" | "disabled"
         "tracked":       tracked,
     }
@@ -200,7 +200,7 @@ async def main():
             logging.error("Connection timed out when fetching alerts.")
 
         if active_alerts is None:
-            write_status(status_path, tracker, time.time() + 30.0, "error") if config.status_api else write_status(status_path, tracker, None, "disabled")
+            write_status(status_path, tracker, int(time.time()) + 30, "error") if config.status_api else write_status(status_path, tracker, None, "disabled")
             print(f"[{time.strftime('%H:%M:%S')}] [!] Could not retrieve alerts. Retrying in 30s.")
             await asyncio.sleep(30.0 + random.uniform(0.0, 1.0))
             continue
@@ -233,7 +233,7 @@ async def main():
     # Mark bot as offline in status file
     try:
         with open(status_path, "w") as f:
-            json.dump({"running": False, "as_of": time.time()}, f)
+            json.dump({"running": False, "as_of": int(time.time())}, f)
     except OSError:
         pass
     print(f"[{time.strftime('%H:%M:%S')}] Bot shut down.")
