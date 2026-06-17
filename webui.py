@@ -958,6 +958,104 @@ document.getElementById('status-api').checked = __STATUS_API__;
 """
 
 
+# ─── Save payload validation ─────────────────────────────────────────────────
+
+_VALID_ZONE_IDS: frozenset[str] = frozenset(_ID_TO_GROUP.keys())
+_VALID_SEVERITIES: frozenset[str] = frozenset({"Unknown", "Minor", "Moderate", "Severe", "Extreme"})
+_VALID_LOG_LEVELS: frozenset[str] = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+_SLEEP_MIN = 5.0
+_SLEEP_MAX = 86400.0  # 24 hours
+
+
+def validate_save_payload(data: dict) -> tuple[dict, list[str]]:
+    """
+    Validate and sanitize a /save POST payload.
+
+    Returns (sanitized_cfg, errors).  If errors is non-empty the caller should
+    reject the request; cfg is only meaningful when errors is empty.
+    """
+    errors: list[str] = []
+
+    # ── zones ──────────────────────────────────────────────────────────────────
+    raw_zones = data.get("zones", [])
+    if not isinstance(raw_zones, list):
+        errors.append("'zones' must be a list.")
+        raw_zones = []
+
+    zones: list[str] = []
+    for z in raw_zones:
+        if not isinstance(z, str):
+            errors.append(f"Zone entry must be a string, got {type(z).__name__!r}.")
+            continue
+        if z not in _VALID_ZONE_IDS:
+            errors.append(f"Unknown zone ID: {z!r}.")
+            continue
+        if z not in zones:
+            zones.append(z)
+
+    if not errors and not zones:
+        errors.append("At least one valid zone is required.")
+
+    # ── severity ───────────────────────────────────────────────────────────────
+    raw_sev = data.get("severity", []) or []
+    if not isinstance(raw_sev, list):
+        errors.append("'severity' must be a list.")
+        raw_sev = []
+
+    severity: list[str] = []
+    for s in raw_sev:
+        if s not in _VALID_SEVERITIES:
+            errors.append(f"Invalid severity value: {s!r}.")
+        elif s not in severity:
+            severity.append(s)
+
+    # ── log_level ──────────────────────────────────────────────────────────────
+    log_level = data.get("log_level", "WARNING")
+    if not isinstance(log_level, str) or log_level.upper() not in _VALID_LOG_LEVELS:
+        errors.append(f"Invalid log_level: {log_level!r}. Must be one of {sorted(_VALID_LOG_LEVELS)}.")
+        log_level = "WARNING"
+    else:
+        log_level = log_level.upper()
+
+    # ── sleep intervals ────────────────────────────────────────────────────────
+    def parse_sleep(key: str, default: float) -> float:
+        val = data.get(key, default)
+        try:
+            val = float(val)
+        except (TypeError, ValueError):
+            errors.append(f"'{key}' must be a number.")
+            return default
+        if not (_SLEEP_MIN <= val <= _SLEEP_MAX):
+            errors.append(
+                f"'{key}' must be between {_SLEEP_MIN} and {_SLEEP_MAX} seconds, got {val}."
+            )
+            return default
+        return val
+
+    sleep_normal = parse_sleep("sleep_normal", 300.0)
+    sleep_urgent = parse_sleep("sleep_urgent", 60.0)
+
+    if not errors and sleep_urgent > sleep_normal:
+        errors.append(
+            f"'sleep_urgent' ({sleep_urgent}s) should not exceed 'sleep_normal' ({sleep_normal}s)."
+        )
+
+    # ── status_api ─────────────────────────────────────────────────────────────
+    status_api = data.get("status_api", True)
+    if not isinstance(status_api, bool):
+        errors.append("'status_api' must be a boolean.")
+        status_api = True
+
+    cfg = {
+        "zones":            zones,
+        "severity":         severity or None,
+        "log_level":        log_level,
+        "sleep_interval":   {"normal": sleep_normal, "urgent": sleep_urgent},
+        "status_api":       status_api,
+    }
+    return cfg, errors
+
+
 # ─── HTTP Server ─────────────────────────────────────────────────────────────
 
 def build_html(cfg: dict) -> str:
@@ -1026,17 +1124,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, "application/json", resp)
             return
 
+        cfg, errors = validate_save_payload(data)
+        if errors:
+            resp = json.dumps({"error": "; ".join(errors)}).encode()
+            self._send(400, "application/json", resp)
+            return
+
         try:
-            cfg = {
-                "zones":      data.get("zones", []),
-                "severity":   data.get("severity", []) or None,
-                "log_level":  str(data.get("log_level", "WARNING")),
-                "sleep_interval": {
-                    "normal": float(data.get("sleep_normal", 300.0)),
-                    "urgent": float(data.get("sleep_urgent", 60.0)),
-                },
-                "status_api": bool(data.get("status_api", True)),
-            }
             write_config(cfg)
             resp = json.dumps({"ok": True}).encode()
             self._send(200, "application/json", resp)
