@@ -1,11 +1,20 @@
-log_level: WARNING
-severity: # Minor, Moderate, Severe, Extreme, Unknown
+# NWS zone or county IDs to watch, e.g. VAZ098 (public zone) or VAC800 (county).
+# To find yours: https://api.weather.gov/points/<latitude>,<longitude>
+# and look at "forecastZone" and "county" in the response.
+zones:
+- VAC800
+
+# Only post these severities. Remove the section to receive all of them.
+severity:
+- Minor
 - Moderate
 - Severe
 - Extreme
+
+# Seconds between polls. "urgent" is used while any active alert has Immediate urgency.
 sleep_interval:
   normal: 300.0
-  urgent: 60.0
-status_api: true
-zones: # Public, county and/or fire zone IDs. see all_zones.csv or use the web UI
-- TXC001
+  urgent: 30.0
+
+# DEBUG, INFO, WARNING, or ERROR
+log_level: WARNING

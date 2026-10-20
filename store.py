@@ -1,92 +1,40 @@
+"""Tiny SQLite store mapping each NWS alert ID to the Discord message announcing it.
+
+This lets the bot delete the right messages after a restart instead of reposting everything.
+"""
 import logging
 import os
+import sqlite3
 import stat
-
-import aiosqlite
-
-import wapi
-
-DB_FILENAME = "alerts.db"
+from contextlib import closing
 
 
-async def init_db(db_path: str) -> None:
-    """Initialize the database and create the alerts table if it doesn't exist."""
-    async with aiosqlite.connect(db_path) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS alerts (
-                alert_id       TEXT PRIMARY KEY,
-                discord_msg_id INTEGER NOT NULL,
-                headline       TEXT,
-                event          TEXT,
-                severity       TEXT,
-                urgency        TEXT,
-                sender_name    TEXT,
-                onset          TEXT,
-                ends           TEXT
-            )
-        """)
-        await db.commit()
-
-    # Restrict file permissions to owner read/write only (600)
-    os.chmod(db_path, stat.S_IRUSR | stat.S_IWUSR)
+def load(db_path: str) -> dict[str, int]:
+    """Create the table if needed and return {alert_id: discord_msg_id}."""
+    with closing(sqlite3.connect(db_path)) as db:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS alerts (alert_id TEXT PRIMARY KEY, discord_msg_id INTEGER NOT NULL)"
+        )
+        db.commit()
+        rows = db.execute("SELECT alert_id, discord_msg_id FROM alerts").fetchall()
+    os.chmod(db_path, stat.S_IRUSR | stat.S_IWUSR)  # owner read/write only
+    return dict(rows)
 
 
-async def load_alerts(db_path: str) -> dict[str, wapi.Alert]:
-    """Load persisted alerts from the database into a dict keyed by alert ID."""
-    import datetime as dt
-    tracked = {}
-    async with aiosqlite.connect(db_path) as db:
-        async with db.execute(
-            "SELECT alert_id, discord_msg_id, headline, event, severity, urgency, sender_name, onset, ends FROM alerts"
-        ) as cursor:
-            async for row in cursor:
-                alert_id, discord_msg_id, headline, event, severity, urgency, sender_name, onset, ends = row
-                alert = wapi.Alert(
-                    id=alert_id,
-                    headline=headline,
-                    event=event,
-                    severity=severity,
-                    urgency=urgency,
-                    sender_name=sender_name,
-                )
-                # onset/ends are stored as ISO strings; restore as datetime objects
-                for field, val in [("onset", onset), ("ends", ends)]:
-                    if val:
-                        try:
-                            setattr(alert, field, dt.datetime.fromisoformat(val))
-                        except ValueError:
-                            pass
-                alert.discord_msg_id = discord_msg_id
-                tracked[alert_id] = alert
-    return tracked
-
-
-async def save_alert(db_path: str, alert: wapi.Alert) -> None:
-    """Persist a newly posted alert to the database."""
-    import datetime as dt
-    def iso(v):
-        return v.isoformat() if isinstance(v, dt.datetime) else None
-
+def save(db_path: str, alert_id: str, discord_msg_id: int) -> None:
     try:
-        async with aiosqlite.connect(db_path) as db:
-            await db.execute(
-                """INSERT OR REPLACE INTO alerts
-                   (alert_id, discord_msg_id, headline, event, severity, urgency, sender_name, onset, ends)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (alert.id, alert.discord_msg_id, alert.headline,
-                 alert.event, alert.severity, alert.urgency, alert.sender_name,
-                 iso(alert.onset), iso(alert.ends)),
+        with closing(sqlite3.connect(db_path)) as db, db:
+            db.execute(
+                "INSERT OR REPLACE INTO alerts (alert_id, discord_msg_id) VALUES (?, ?)",
+                (alert_id, discord_msg_id),
             )
-            await db.commit()
-    except aiosqlite.Error as e:
-        logging.error(f"Failed to save alert {alert.id} to DB: {e}")
+    except sqlite3.Error as e:
+        logging.error(f"Failed to save alert {alert_id} to DB: {e}")
 
 
-async def remove_alert(db_path: str, alert_id: str) -> None:
-    """Remove an alert from the database."""
+def remove(db_path: str, alert_id: str) -> None:
     try:
-        async with aiosqlite.connect(db_path) as db:
-            await db.execute("DELETE FROM alerts WHERE alert_id = ?", (alert_id,))
-            await db.commit()
-    except aiosqlite.Error as e:
+        with closing(sqlite3.connect(db_path)) as db, db:
+            db.execute("DELETE FROM alerts WHERE alert_id = ?", (alert_id,))
+    except sqlite3.Error as e:
         logging.error(f"Failed to remove alert {alert_id} from DB: {e}")
